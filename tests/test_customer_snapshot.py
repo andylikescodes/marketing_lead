@@ -57,12 +57,40 @@ class CustomerSnapshotTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "customers.sqlite"
             _write_customer(path, business="Basik", address1="323 Graham Avenue", phone="", zip_code="11211")
-            lead = _lead(name="Unknown", address_1="323 Graham Ave", postcode="11211")
+            lead = _lead(name="Basik Bar", address_1="323 Graham Ave", postcode="11211")
 
             count, _ = apply_customer_matches([lead], snapshot_path=path)
 
             self.assertEqual(count, 1)
             self.assertIn("customer_match_zip_address", lead.signals)
+
+    def test_same_address_with_conflicting_name_is_not_automatic_match(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "customers.sqlite"
+            _write_customer(path, business="Basik", address1="323 Graham Avenue", phone="", zip_code="11211")
+            lead = _lead(name="Different Restaurant", address_1="323 Graham Ave", postcode="11211")
+
+            count, _ = apply_customer_matches([lead], snapshot_path=path)
+
+            self.assertEqual(count, 0)
+            self.assertEqual(lead.lead_status, "new_lead")
+
+    def test_llm_reviewer_can_confirm_ambiguous_address_match(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "customers.sqlite"
+            _write_customer(path, business="Basik", address1="323 Graham Avenue", phone="", zip_code="11211")
+            lead = _lead(name="Different DBA", address_1="323 Graham Ave", postcode="11211")
+
+            def reviewer(_lead, customer, candidate_reason):
+                self.assertEqual(customer["customer_id"], "C123")
+                self.assertEqual(candidate_reason, "zip_address_ambiguous")
+                return True, 91, "Same location and DBA confirmed by reviewer."
+
+            count, _ = apply_customer_matches([lead], snapshot_path=path, match_reviewer=reviewer)
+
+            self.assertEqual(count, 1)
+            self.assertIn("customer_match_llm_zip_address_ambiguous", lead.signals)
+            self.assertIn("DBA confirmed", lead.verification_summary)
 
     def test_matches_by_zip_and_business_name(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

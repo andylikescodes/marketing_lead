@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
 
 from marketing_lead.models import LeadCandidate
 
@@ -109,6 +109,10 @@ class CustomerMatch:
     last_shopped: str
     confidence: int
     reason: str
+    review_note: str = ""
+
+
+MatchReviewer = Callable[[LeadCandidate, dict[str, str], str], tuple[bool, int, str] | None]
 
 
 def refresh_customer_snapshot(
@@ -158,6 +162,7 @@ def refresh_customer_snapshot(
 def apply_customer_matches(
     leads: list[LeadCandidate],
     snapshot_path: Path = DEFAULT_SNAPSHOT_PATH,
+    match_reviewer: MatchReviewer | None = None,
 ) -> tuple[int, str]:
     if not snapshot_path.exists():
         detail = f"Customer snapshot not found at {snapshot_path}. Run `marketing-lead customers refresh`."
@@ -170,7 +175,7 @@ def apply_customer_matches(
     try:
         connection.row_factory = sqlite3.Row
         for lead in leads:
-            match = find_customer_match(connection, lead)
+            match = find_customer_match(connection, lead, match_reviewer=match_reviewer)
             if match:
                 matched += 1
                 apply_match(lead, match)
@@ -206,7 +211,11 @@ def active_customers_for_zip(
         connection.close()
 
 
-def find_customer_match(connection: sqlite3.Connection, lead: LeadCandidate) -> CustomerMatch | None:
+def find_customer_match(
+    connection: sqlite3.Connection,
+    lead: LeadCandidate,
+    match_reviewer: MatchReviewer | None = None,
+) -> CustomerMatch | None:
     phone = normalize_phone(lead.phone)
     if len(phone) >= 10:
         row = connection.execute(
@@ -223,30 +232,43 @@ def find_customer_match(connection: sqlite3.Connection, lead: LeadCandidate) -> 
 
     zip_code = zip5(lead.postcode)
     address = normalize_address(lead.address_1)
+    name = normalize_name(lead.name)
+
     if zip_code and address:
-        row = connection.execute(
+        rows = connection.execute(
             """
             SELECT * FROM customers
             WHERE status = ? AND zip5 = ? AND norm_address = ?
             ORDER BY last_visit DESC
-            LIMIT 1
+            LIMIT 50
             """,
             (ACTIVE_CUSTOMER_STATUS, zip_code, address),
-        ).fetchone()
+        ).fetchall()
+        row, name_ratio = _best_name_row(rows, name)
         if row:
-            return _row_to_match(row, confidence=90, reason="zip_address")
+            if not name or name_ratio >= 0.55:
+                return _row_to_match(row, confidence=90, reason="zip_address")
+            reviewed = _review_candidate(
+                lead,
+                row,
+                candidate_reason="zip_address_ambiguous",
+                default_confidence=88,
+                match_reviewer=match_reviewer,
+            )
+            if reviewed:
+                return reviewed
 
-    name = normalize_name(lead.name)
     if zip_code and name:
-        row = connection.execute(
+        rows = connection.execute(
             """
             SELECT * FROM customers
             WHERE status = ? AND zip5 = ? AND norm_name = ?
             ORDER BY last_visit DESC
-            LIMIT 1
+            LIMIT 25
             """,
             (ACTIVE_CUSTOMER_STATUS, zip_code, name),
-        ).fetchone()
+        ).fetchall()
+        row = _best_address_row(rows, address)
         if row:
             return _row_to_match(row, confidence=86, reason="zip_name")
 
@@ -267,6 +289,16 @@ def find_customer_match(connection: sqlite3.Connection, lead: LeadCandidate) -> 
                 best_row = candidate
         if best_row and best_ratio >= 0.88:
             return _row_to_match(best_row, confidence=int(82 + (best_ratio - 0.88) * 50), reason="zip_fuzzy_name")
+        if best_row and best_ratio >= 0.80:
+            reviewed = _review_candidate(
+                lead,
+                best_row,
+                candidate_reason="zip_fuzzy_name_ambiguous",
+                default_confidence=int(72 + (best_ratio - 0.80) * 120),
+                match_reviewer=match_reviewer,
+            )
+            if reviewed:
+                return reviewed
 
     return None
 
@@ -287,6 +319,8 @@ def apply_match(lead: LeadCandidate, match: CustomerMatch) -> None:
         f"Matched existing customer {match.customer_id}"
         f" ({match.business}) by {match.reason.replace('_', ' ')}."
     )
+    if match.review_note:
+        summary = f"{summary} Review: {match.review_note}"
     lead.verification_summary = _join_summary(lead.verification_summary, summary)
 
 
@@ -417,6 +451,84 @@ def _row_to_match(row: sqlite3.Row, confidence: int, reason: str) -> CustomerMat
         confidence=max(0, min(confidence, 100)),
         reason=reason,
     )
+
+
+def _best_name_row(rows: list[sqlite3.Row], normalized_name: str) -> tuple[sqlite3.Row | None, float]:
+    best_row = None
+    best_ratio = -1.0
+    for row in rows:
+        row_name = str(row["norm_name"] or "")
+        if normalized_name and row_name:
+            ratio = SequenceMatcher(None, normalized_name, row_name).ratio()
+        else:
+            ratio = 0.0
+        if ratio > best_ratio:
+            best_ratio = ratio
+            best_row = row
+    return best_row, max(best_ratio, 0.0)
+
+
+def _best_address_row(rows: list[sqlite3.Row], normalized_address: str) -> sqlite3.Row | None:
+    if not rows:
+        return None
+    if normalized_address:
+        for row in rows:
+            if str(row["norm_address"] or "") == normalized_address:
+                return row
+    return rows[0]
+
+
+def _review_candidate(
+    lead: LeadCandidate,
+    row: sqlite3.Row,
+    candidate_reason: str,
+    default_confidence: int,
+    match_reviewer: MatchReviewer | None,
+) -> CustomerMatch | None:
+    if not match_reviewer:
+        return None
+    review = match_reviewer(lead, _row_to_payload(row), candidate_reason)
+    if not review:
+        return None
+    same_business, confidence, note = review
+    if not same_business or confidence < 75:
+        return None
+    base = _row_to_match(
+        row,
+        confidence=min(max(confidence, default_confidence), 95),
+        reason=f"llm_{candidate_reason}",
+    )
+    return CustomerMatch(
+        customer_id=base.customer_id,
+        branch=base.branch,
+        status=base.status,
+        business=base.business,
+        address1=base.address1,
+        city=base.city,
+        state=base.state,
+        zip_code=base.zip_code,
+        phone=base.phone,
+        last_visit=base.last_visit,
+        last_shopped=base.last_shopped,
+        confidence=base.confidence,
+        reason=base.reason,
+        review_note=note,
+    )
+
+
+def _row_to_payload(row: sqlite3.Row) -> dict[str, str]:
+    return {
+        "customer_id": str(row["customer_id"] or ""),
+        "business": str(row["business"] or ""),
+        "address1": str(row["address1"] or ""),
+        "address2": str(row["address2"] or ""),
+        "city": str(row["city"] or ""),
+        "state": str(row["state"] or ""),
+        "zip": str(row["zip"] or ""),
+        "phone": str(row["phone"] or ""),
+        "status": str(row["status"] or ""),
+        "branch": str(row["branch"] or ""),
+    }
 
 
 def _append_unique(values: list[str], value: str) -> None:

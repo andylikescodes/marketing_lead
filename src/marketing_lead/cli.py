@@ -123,6 +123,28 @@ def _build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Write a detailed validation log. Defaults to the output path with a .log extension.",
     )
+    validate.add_argument(
+        "--use-llm-match",
+        action="store_true",
+        help="Use Ollama to adjudicate ambiguous customer matches.",
+    )
+    validate.add_argument(
+        "--llm-match-model",
+        default="kimi-k2.6:cloud",
+        help="Ollama model for ambiguous customer match review.",
+    )
+    validate.add_argument(
+        "--llm-match-limit",
+        type=int,
+        default=100,
+        help="Maximum ambiguous customer matches to send to Ollama; 0 means unlimited.",
+    )
+    validate.add_argument(
+        "--llm-match-timeout",
+        type=int,
+        default=30,
+        help="Ollama customer match review timeout in seconds.",
+    )
 
     serve = subparsers.add_parser("serve", help="Start the local web app.")
     serve.add_argument("--host", default="127.0.0.1", help="Host to bind.")
@@ -334,7 +356,56 @@ def _validate_customers(args: argparse.Namespace) -> None:
 
     log_event(10, "load_discovery", f"Loaded {len(result.leads)} discovered leads.")
     log_event(35, "customer_snapshot", f"Matching against local customer snapshot at {args.snapshot}.")
-    customer_count, customer_detail = apply_customer_matches(result.leads, snapshot_path=args.snapshot)
+    llm_match_state = {"used": 0}
+    match_reviewer = None
+    if args.use_llm_match:
+        from marketing_lead.customer_match_llm import review_customer_match_with_ollama
+
+        if ":cloud" in args.llm_match_model:
+            logger.warning(
+                "LLM customer match review is using cloud-backed Ollama model %s. "
+                "Customer records may leave the local machine.",
+                args.llm_match_model,
+            )
+
+        def match_reviewer(lead, customer, candidate_reason):
+            if args.llm_match_limit and llm_match_state["used"] >= args.llm_match_limit:
+                return None
+            llm_match_state["used"] += 1
+            try:
+                review = review_customer_match_with_ollama(
+                    lead,
+                    customer,
+                    candidate_reason=candidate_reason,
+                    model=args.llm_match_model,
+                    timeout_seconds=args.llm_match_timeout,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "LLM match review failed for lead=%s customer_id=%s reason=%s error=%s",
+                    lead.name,
+                    customer.get("customer_id", ""),
+                    candidate_reason,
+                    exc,
+                )
+                return None
+            if review:
+                logger.info(
+                    "LLM match review lead=%s customer_id=%s candidate=%s same=%s confidence=%s reason=%s",
+                    lead.name,
+                    customer.get("customer_id", ""),
+                    candidate_reason,
+                    review[0],
+                    review[1],
+                    review[2],
+                )
+            return review
+
+    customer_count, customer_detail = apply_customer_matches(
+        result.leads,
+        snapshot_path=args.snapshot,
+        match_reviewer=match_reviewer,
+    )
     customer_status = "ok"
     if "not found" in customer_detail.lower():
         customer_status = "warning"
@@ -405,6 +476,9 @@ def _validate_customers(args: argparse.Namespace) -> None:
         "existing_customer_count": sum(1 for lead in scored if lead.lead_status == "existing_customer"),
         "active_customers_in_zip": len(active_customers),
         "active_customer_branch_distribution": _format_counter(branch_counts),
+        "llm_match_review_enabled": args.use_llm_match,
+        "llm_match_model": args.llm_match_model if args.use_llm_match else "",
+        "llm_match_reviews_used": llm_match_state["used"],
         "log_file": str(log_file),
     }
 
