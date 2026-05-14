@@ -1,0 +1,37 @@
+2026-05-14 16:38:25 INFO Starting cloud/network lead discovery.
+2026-05-14 16:38:25 INFO Parameter workflow_part=cloud_discovery
+2026-05-14 16:38:25 INFO Parameter started_at=2026-05-14T16:38:25.539731+00:00
+2026-05-14 16:38:25 INFO Parameter zip=90015
+2026-05-14 16:38:25 INFO Parameter radius_mi=15.0
+2026-05-14 16:38:25 INFO Parameter limit=2000
+2026-05-14 16:38:25 INFO Parameter include_abc=True
+2026-05-14 16:38:25 INFO Parameter include_llm=False
+2026-05-14 16:38:25 INFO Parameter llm_model=kimi-k2.6:cloud
+2026-05-14 16:38:25 INFO Parameter llm_limit=0
+2026-05-14 16:38:25 INFO Parameter include_customer_snapshot=False
+2026-05-14 16:38:25 INFO Parameter overpass_url=https://overpass-api.de/api/interpreter
+2026-05-14 16:38:25 INFO Parameter overpass_timeout=45
+2026-05-14 16:38:25 INFO Parameter output_path=data/discovery_90015_r15_l2000.json
+2026-05-14 16:38:25 INFO Parameter log_file=data/discovery_90015_r15_l2000.log
+2026-05-14 16:38:25 INFO [3%] zip: Resolving ZIP/ZCTA center.
+2026-05-14 16:38:26 INFO [8%] zip: ZIP 90015 resolved to 34.03931, -118.26626.
+2026-05-14 16:38:26 INFO [12%] openstreetmap: Searching OpenStreetMap / Overpass.
+2026-05-14 16:38:58 INFO [34%] ca_abc: Checking California ABC license data.
+2026-05-14 16:39:01 INFO [48%] merge: Merging duplicate source records.
+2026-05-14 16:46:16 INFO [58%] customer_snapshot: Skipping local customer snapshot; discovery artifact is cloud-portable.
+2026-05-14 16:46:16 INFO [68%] scoring: Scoring source and customer signals.
+2026-05-14 16:46:16 INFO [100%] complete: Search complete with 2000 leads.
+2026-05-14 16:46:16 INFO Result summary: exported=2000 collected=2000 merged_duplicates=662 high_score=6 review_first=1994 existing_customers=0
+2026-05-14 16:46:16 INFO Source openstreetmap status=ok count=11275 detail=Free POI discovery for restaurants, cafes, bars, bakeries, grocery, and related food businesses.
+2026-05-14 16:46:16 INFO Source ca_abc status=ok count=123 detail=Free California alcohol license/application data; useful for restaurants, bars, groceries, liquor stores, and brewpubs.
+2026-05-14 16:46:16 INFO Lead score=92 status=new_lead name=Baar Baar source=openstreetmap; ca_abc address=705 West 9th Street, Los Angeles, CA, 90015
+2026-05-14 16:46:16 INFO Lead score=92 status=new_lead name=LudoBird source=openstreetmap; ca_abc address=1111 S Figueroa Street, Los Angeles, CA, 90015
+2026-05-14 16:46:16 INFO Lead score=92 status=new_lead name=Paul's Kitchen source=openstreetmap; ca_abc address=1012 South San Pedro Street, Los Angeles, CA, 90015
+2026-05-14 16:46:16 INFO Lead score=92 status=new_lead name=Prank source=openstreetmap; ca_abc address=1100 South Hope Street, Los Angeles, CA, 90015
+2026-05-14 16:46:16 INFO Lead score=92 status=new_lead name=Sakana Sushi source=openstreetmap; ca_abc address=898 South Olive Street, Los Angeles, CA, 90015
+2026-05-14 16:46:16 INFO Lead score=92 status=new_lead name=Zinque source=openstreetmap; ca_abc address=939 South Broadway, Los Angeles, CA, 90015
+2026-05-14 16:46:16 INFO Lead score=78 status=new_lead name=33 TAPS DTLA source=ca_abc address=1240 S FIGUEROA ST, Los Angeles, CA, 90015
+2026-05-14 16:46:16 INFO Lead score=78 status=new_lead name=7-ELEVEN STORE 39646B source=ca_abc address=504 W OLYMPIC BLVD, Los Angeles, CA, 90015
+2026-05-14 16:46:16 INFO Lead score=78 status=new_lead name=9TH & OLIVE source=ca_abc address=908-912 S OLIVE ST, Los Angeles, CA, 90015
+2026-05-14 16:46:16 INFO Lead score=78 status=new_lead name=9TH ST RAMEN source=ca_abc address=111 W 9TH ST, Los Angeles, CA, 90015
+2026-05-14 16:46:16 INFO Lead log truncated after top 10 exported leads; workbook contains all 2000.
