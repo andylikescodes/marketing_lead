@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "marketing-lead"
+version = "0.1.0"
+description = "Prototype lead discovery and validation pipeline for foodservice businesses by ZIP code."
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+marketing-lead = "marketing_lead.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+marketing_lead = ["static/*.html"]
