@@ -8,6 +8,7 @@ from marketing_lead.ca_abc import collect_ca_abc_leads
 from marketing_lead.customer_snapshot import DEFAULT_SNAPSHOT_PATH, apply_customer_matches
 from marketing_lead.llm import annotate_with_llm
 from marketing_lead.merge import merge_leads
+from marketing_lead.openbrewery import collect_openbrewery_leads
 from marketing_lead.models import LeadCandidate, ZipLocation
 from marketing_lead.osm import OVERPASS_URL, collect_osm_leads
 from marketing_lead.scoring import score_leads
@@ -143,6 +144,34 @@ def search_leads(
             SourceReport(
                 name="openstreetmap",
                 label="OpenStreetMap / Overpass",
+                count=0,
+                status="error",
+                detail=str(exc),
+            )
+        )
+
+
+    _progress(progress_callback, 24, "Searching Open Brewery DB.", stage="openbrewery")
+    try:
+        openbrewery_leads = collect_openbrewery_leads(
+            location,
+            radius_meters=radius_meters,
+        )
+        all_leads.extend(openbrewery_leads)
+        reports.append(
+            SourceReport(
+                name="openbrewerydb",
+                label="Open Brewery DB",
+                count=len(openbrewery_leads),
+                status="ok",
+                detail="Free brewery/taproom directory source used as an independent cross-check for alcohol-serving leads.",
+            )
+        )
+    except Exception as exc:
+        reports.append(
+            SourceReport(
+                name="openbrewerydb",
+                label="Open Brewery DB",
                 count=0,
                 status="error",
                 detail=str(exc),

@@ -7,6 +7,7 @@ The current implementation uses:
 - U.S. Census 2025 ZCTA Gazetteer data for ZIP/ZCTA center points.
 - OpenStreetMap via Overpass API for restaurants, cafes, bars, bakeries, groceries, caterers, and related foodservice places.
 - California ABC daily license data for California alcohol-license validation.
+- Open Brewery DB for independent brewery/taproom leads and cross-source confirmation.
 - Optional Ollama review notes through the local Ollama API.
 - A conservative confidence score that treats one-source records as discovery leads, not final verified leads.
 
@@ -93,7 +94,7 @@ The web app is still available for local exploration, but the main workflow is n
 
 ## Why This Is Only Layer One
 
-OpenStreetMap is useful for broad discovery and can be stored under its license terms, but it is not enough to dispatch FMRs confidently. A production-grade system should cross-check each lead against independent sources:
+OpenStreetMap plus Open Brewery DB provide a stronger free baseline for discovery and cross-checking, but they are still not enough to dispatch FMRs confidently. A production-grade system should add additional independent sources:
 
 - Google Places API for current business status and high-quality POI matching.
 - Yelp/Foursquare for independent consumer-directory confirmation.
