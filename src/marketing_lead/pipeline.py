@@ -8,6 +8,7 @@ from marketing_lead.ca_abc import collect_ca_abc_leads
 from marketing_lead.customer_snapshot import DEFAULT_SNAPSHOT_PATH, apply_customer_matches
 from marketing_lead.llm import annotate_with_llm
 from marketing_lead.merge import merge_leads
+from marketing_lead.openbrewery import collect_openbrewery_leads
 from marketing_lead.models import LeadCandidate, ZipLocation
 from marketing_lead.openbrewery import collect_openbrewery_leads
 from marketing_lead.osm import OVERPASS_URL, collect_osm_leads
