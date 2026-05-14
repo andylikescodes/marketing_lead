@@ -9,6 +9,7 @@ from marketing_lead.customer_snapshot import DEFAULT_SNAPSHOT_PATH, apply_custom
 from marketing_lead.llm import annotate_with_llm
 from marketing_lead.merge import merge_leads
 from marketing_lead.models import LeadCandidate, ZipLocation
+from marketing_lead.openbrewery import collect_openbrewery_leads
 from marketing_lead.osm import OVERPASS_URL, collect_osm_leads
 from marketing_lead.scoring import score_leads
 from marketing_lead.zcta import lookup_zip_centroid
@@ -94,6 +95,17 @@ class LeadSearchResult:
         }
 
 
+@dataclass(frozen=True)
+class LeadSource:
+    name: str
+    label: str
+    stage: str
+    progress: int
+    detail: str
+    message: str
+    collector: Callable[[ZipLocation, int], list[LeadCandidate]]
+
+
 def search_leads(
     zip_code: str,
     radius_mi: float = 1.0,
@@ -120,59 +132,13 @@ def search_leads(
     all_leads: list[LeadCandidate] = []
     reports: list[SourceReport] = []
 
-    _progress(progress_callback, 12, "Searching OpenStreetMap / Overpass.", stage="openstreetmap")
-    try:
-        osm_leads = collect_osm_leads(
-            location,
-            radius_meters,
-            overpass_url=overpass_url,
-            timeout_seconds=overpass_timeout,
-        )
-        all_leads.extend(osm_leads)
-        reports.append(
-            SourceReport(
-                name="openstreetmap",
-                label="OpenStreetMap / Overpass",
-                count=len(osm_leads),
-                status="ok",
-                detail="Free POI discovery for restaurants, cafes, bars, bakeries, grocery, and related food businesses.",
-            )
-        )
-    except Exception as exc:
-        reports.append(
-            SourceReport(
-                name="openstreetmap",
-                label="OpenStreetMap / Overpass",
-                count=0,
-                status="error",
-                detail=str(exc),
-            )
-        )
-
-    if include_abc:
-        _progress(progress_callback, 34, "Checking California ABC license data.", stage="ca_abc")
-        try:
-            abc_leads = collect_ca_abc_leads(location)
-            all_leads.extend(abc_leads)
-            reports.append(
-                SourceReport(
-                    name="ca_abc",
-                    label="California ABC Daily License Export",
-                    count=len(abc_leads),
-                    status="ok",
-                    detail="Free California alcohol license/application data; useful for restaurants, bars, groceries, liquor stores, and brewpubs.",
-                )
-            )
-        except Exception as exc:
-            reports.append(
-                SourceReport(
-                    name="ca_abc",
-                    label="California ABC Daily License Export",
-                    count=0,
-                    status="error",
-                    detail=str(exc),
-                )
-            )
+    for source in _lead_sources(
+        include_abc=include_abc,
+        overpass_url=overpass_url,
+        overpass_timeout=overpass_timeout,
+    ):
+        _progress(progress_callback, source.progress, source.message, stage=source.stage)
+        _run_source(source, location, radius_meters, all_leads, reports)
 
     _progress(progress_callback, 48, "Merging duplicate source records.", stage="merge")
     merged = merge_leads(all_leads)
@@ -225,6 +191,65 @@ def search_leads(
         leads=scored,
         merged_count=max(0, len(all_leads) - len(merged)),
     )
+
+
+def _lead_sources(*, include_abc: bool, overpass_url: str, overpass_timeout: int) -> list[LeadSource]:
+    def collect_osm(location: ZipLocation, radius_meters: int) -> list[LeadCandidate]:
+        return collect_osm_leads(
+            location,
+            radius_meters,
+            overpass_url=overpass_url,
+            timeout_seconds=overpass_timeout,
+        )
+
+    sources = [
+        LeadSource(
+            name="openstreetmap",
+            label="OpenStreetMap / Overpass",
+            stage="openstreetmap",
+            progress=12,
+            message="Searching OpenStreetMap / Overpass.",
+            detail="Free POI discovery for restaurants, cafes, bars, bakeries, grocery, and related food businesses.",
+            collector=collect_osm,
+        ),
+        LeadSource(
+            name="openbrewerydb",
+            label="Open Brewery DB",
+            stage="openbrewery",
+            progress=24,
+            message="Searching Open Brewery DB.",
+            detail="Free brewery/taproom directory source used as an independent cross-check for alcohol-serving leads.",
+            collector=lambda location, radius_meters: collect_openbrewery_leads(location, radius_meters=radius_meters),
+        ),
+    ]
+    if include_abc:
+        sources.append(
+            LeadSource(
+                name="ca_abc",
+                label="California ABC Daily License Export",
+                stage="ca_abc",
+                progress=34,
+                message="Checking California ABC license data.",
+                detail="Free California alcohol license/application data; useful for restaurants, bars, groceries, liquor stores, and brewpubs.",
+                collector=lambda location, _: collect_ca_abc_leads(location),
+            )
+        )
+    return sources
+
+
+def _run_source(
+    source: LeadSource,
+    location: ZipLocation,
+    radius_meters: int,
+    all_leads: list[LeadCandidate],
+    reports: list[SourceReport],
+) -> None:
+    try:
+        leads = source.collector(location, radius_meters)
+        all_leads.extend(leads)
+        reports.append(SourceReport(name=source.name, label=source.label, count=len(leads), status="ok", detail=source.detail))
+    except Exception as exc:
+        reports.append(SourceReport(name=source.name, label=source.label, count=0, status="error", detail=str(exc)))
 
 
 def _progress(
