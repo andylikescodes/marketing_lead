@@ -10,6 +10,15 @@ class ZipLocation:
     longitude: float
     source: str
 
+    @classmethod
+    def from_dict(cls, payload: dict[str, object], zip_code: str = "") -> "ZipLocation":
+        return cls(
+            zip_code=str(payload.get("zip_code") or zip_code),
+            latitude=float(payload.get("latitude") or 0),
+            longitude=float(payload.get("longitude") or 0),
+            source=str(payload.get("source") or ""),
+        )
+
 
 @dataclass
 class LeadCandidate:
@@ -30,6 +39,46 @@ class LeadCandidate:
     signals: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     llm_notes: str = ""
+    lead_status: str = "new_lead"
+    customer_id: str = ""
+    customer_status: str = ""
+    customer_branch: str = ""
+    customer_last_visit: str = ""
+    customer_last_shopped: str = ""
+    customer_match_confidence: int = 0
+    verification_summary: str = ""
+    verification_sources: list[str] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, object]) -> "LeadCandidate":
+        return cls(
+            name=str(payload.get("name") or ""),
+            category=str(payload.get("category") or "unknown"),
+            address_1=str(payload.get("address_1") or ""),
+            city=str(payload.get("city") or ""),
+            state=str(payload.get("state") or ""),
+            postcode=str(payload.get("postcode") or ""),
+            latitude=float(payload.get("latitude") or 0),
+            longitude=float(payload.get("longitude") or 0),
+            phone=str(payload.get("phone") or ""),
+            website=str(payload.get("website") or ""),
+            opening_hours=str(payload.get("opening_hours") or ""),
+            source=str(payload.get("source") or ""),
+            source_id=str(payload.get("source_id") or ""),
+            confidence_score=int(payload.get("confidence_score") or 0),
+            signals=_split_list(payload.get("signals")),
+            warnings=_split_list(payload.get("warnings")),
+            llm_notes=str(payload.get("llm_notes") or ""),
+            lead_status=str(payload.get("lead_status") or "new_lead"),
+            customer_id=str(payload.get("customer_id") or ""),
+            customer_status=str(payload.get("customer_status") or ""),
+            customer_branch=str(payload.get("customer_branch") or ""),
+            customer_last_visit=str(payload.get("customer_last_visit") or ""),
+            customer_last_shopped=str(payload.get("customer_last_shopped") or ""),
+            customer_match_confidence=int(payload.get("customer_match_confidence") or 0),
+            verification_summary=str(payload.get("verification_summary") or ""),
+            verification_sources=_split_list(payload.get("verification_sources")),
+        )
 
     @property
     def source_names(self) -> list[str]:
@@ -55,4 +104,21 @@ class LeadCandidate:
             "signals": "; ".join(self.signals),
             "warnings": "; ".join(self.warnings),
             "llm_notes": self.llm_notes,
+            "lead_status": self.lead_status,
+            "customer_id": self.customer_id,
+            "customer_status": self.customer_status,
+            "customer_branch": self.customer_branch,
+            "customer_last_visit": self.customer_last_visit,
+            "customer_last_shopped": self.customer_last_shopped,
+            "customer_match_confidence": self.customer_match_confidence,
+            "verification_summary": self.verification_summary,
+            "verification_sources": "; ".join(self.verification_sources),
         }
+
+
+def _split_list(value: object) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return [part.strip() for part in str(value).split(";") if part.strip()]

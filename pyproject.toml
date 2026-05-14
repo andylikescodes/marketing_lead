@@ -9,6 +9,9 @@ description = "Prototype lead discovery and validation pipeline for foodservice 
 requires-python = ">=3.11"
 dependencies = []
 
+[project.optional-dependencies]
+sql = ["pyodbc>=5.0"]
+
 [project.scripts]
 marketing-lead = "marketing_lead.cli:main"
 

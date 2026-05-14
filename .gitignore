@@ -20,6 +20,10 @@ env/
 .cache/
 data/*.csv
 data/*.json
+data/*.xlsx
+data/*.log
+data/*.sqlite
+data/*.sqlite-*
 !data/.gitkeep
 
 # Environment files

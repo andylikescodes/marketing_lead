@@ -149,6 +149,14 @@
         opacity: 0.65;
       }
 
+      .button-link.disabled {
+        border-color: #c8d1df;
+        color: #7b8796;
+        background: #eef2f7;
+        cursor: not-allowed;
+        pointer-events: none;
+      }
+
       .status-line {
         min-height: 24px;
         margin: 12px 0;
@@ -160,9 +168,35 @@
         font-weight: 700;
       }
 
+      .progress-wrap {
+        display: grid;
+        gap: 8px;
+        margin: 12px 0;
+      }
+
+      .progress-track {
+        width: 100%;
+        height: 10px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: #dce3ee;
+      }
+
+      .progress-fill {
+        height: 100%;
+        width: 0%;
+        background: var(--green);
+        transition: width 180ms ease;
+      }
+
+      .progress-meta {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
       .summary {
         display: grid;
-        grid-template-columns: repeat(5, minmax(0, 1fr));
+        grid-template-columns: repeat(6, minmax(0, 1fr));
         gap: 12px;
         margin: 12px 0;
       }
@@ -241,7 +275,7 @@
 
       table {
         width: 100%;
-        min-width: 1180px;
+        min-width: 1560px;
         border-collapse: collapse;
       }
 
@@ -369,15 +403,15 @@
         </label>
         <label>
           Radius mi
-          <input id="radiusInput" name="radius_mi" type="number" min="0.1" max="15" step="0.1" value="1" required />
+          <input id="radiusInput" name="radius_mi" type="number" min="0.1" max="50" step="0.1" value="1" required />
         </label>
         <label>
           Limit
-          <input id="limitInput" name="limit" type="number" min="0" max="500" step="1" value="150" />
+          <input id="limitInput" name="limit" type="number" min="0" max="2000" step="1" value="150" />
         </label>
         <div class="checks">
           <label class="check"><input id="abcInput" type="checkbox" checked /> CA ABC licenses</label>
-          <label class="check"><input id="llmInput" type="checkbox" /> Ollama review</label>
+          <label class="check"><input id="llmInput" type="checkbox" /> Ollama + web verification</label>
           <label>
             LLM model
             <input id="llmModelInput" type="text" value="kimi-k2.6:cloud" />
@@ -390,6 +424,10 @@
       </form>
 
       <div id="statusLine" class="status-line">Enter a ZIP code and run a search.</div>
+      <section class="progress-wrap" aria-label="Search progress">
+        <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+        <div class="progress-meta" id="progressMeta">Idle.</div>
+      </section>
 
       <section class="summary" id="summary"></section>
       <section class="sources" id="sources"></section>
@@ -399,17 +437,20 @@
           <thead>
             <tr>
               <th>Score</th>
+              <th>Status</th>
               <th>Lead</th>
               <th>Category</th>
               <th>Address</th>
+              <th>Customer</th>
               <th>Sources</th>
               <th>Signals</th>
               <th>Warnings</th>
+              <th>Verification</th>
               <th>LLM Notes</th>
             </tr>
           </thead>
           <tbody id="leadRows">
-            <tr><td colspan="8" class="empty">No search has been run.</td></tr>
+            <tr><td colspan="11" class="empty">No search has been run.</td></tr>
           </tbody>
         </table>
       </section>
@@ -424,6 +465,12 @@
       const exportLink = document.getElementById("exportLink");
       const searchButton = document.getElementById("searchButton");
       const locationLabel = document.getElementById("locationLabel");
+      const progressFill = document.getElementById("progressFill");
+      const progressMeta = document.getElementById("progressMeta");
+      let currentJobId = "";
+      let pollTimer = null;
+
+      disableExport();
 
       form.addEventListener("submit", async (event) => {
         event.preventDefault();
@@ -431,42 +478,90 @@
       });
 
       exportLink.addEventListener("click", (event) => {
-        const href = buildUrl("/api/export.csv");
-        exportLink.href = href;
+        if (exportLink.classList.contains("disabled")) {
+          event.preventDefault();
+        }
       });
 
       async function runSearch() {
         setBusy(true);
+        disableExport();
+        if (pollTimer) window.clearTimeout(pollTimer);
         statusLine.className = "status-line";
-        statusLine.textContent = "Searching free sources and scoring leads...";
+        statusLine.textContent = "Starting search job...";
+        setProgress(0, "Queued.");
         summary.innerHTML = "";
         sources.innerHTML = "";
+        leadRows.innerHTML = `<tr><td colspan="11" class="empty">Search is running.</td></tr>`;
 
         try {
-          const response = await fetch(buildUrl("/api/search"));
+          const response = await fetch("/api/search-jobs", {
+            method: "POST",
+            headers: {"Content-Type": "application/x-www-form-urlencoded"},
+            body: buildParams().toString(),
+          });
           const payload = await response.json();
           if (!response.ok) throw new Error(payload.error || "Search failed");
-          render(payload);
-          statusLine.textContent = `Found ${payload.summary.lead_count} scored leads.`;
+          currentJobId = payload.id;
+          updateJobStatus(payload);
+          await pollJob();
         } catch (error) {
           statusLine.className = "status-line error";
           statusLine.textContent = error.message;
-          leadRows.innerHTML = `<tr><td colspan="8" class="empty">Search failed.</td></tr>`;
-        } finally {
+          leadRows.innerHTML = `<tr><td colspan="11" class="empty">Search failed.</td></tr>`;
           setBusy(false);
         }
       }
 
-      function buildUrl(path) {
-        const params = new URLSearchParams({
+      async function pollJob() {
+        if (!currentJobId) return;
+        try {
+          const response = await fetch(`/api/search-jobs/${currentJobId}`);
+          const payload = await response.json();
+          if (!response.ok) throw new Error(payload.error || "Search failed");
+          updateJobStatus(payload);
+          if (payload.status === "completed") {
+            render(payload.result);
+            statusLine.className = "status-line";
+            statusLine.textContent = `Found ${payload.result.summary.lead_count} scored leads.`;
+            enableExport(`/api/search-jobs/${currentJobId}/export.csv`);
+            setBusy(false);
+            return;
+          }
+          if (payload.status === "failed") {
+            throw new Error(payload.error || payload.message || "Search failed");
+          }
+          pollTimer = window.setTimeout(pollJob, 900);
+        } catch (error) {
+          statusLine.className = "status-line error";
+          statusLine.textContent = error.message;
+          leadRows.innerHTML = `<tr><td colspan="11" class="empty">Search failed.</td></tr>`;
+          setBusy(false);
+        }
+      }
+
+      function updateJobStatus(payload) {
+        setProgress(payload.progress || 0, payload.message || "Working...");
+        const leadText = payload.current_lead ? ` · ${payload.current_lead}` : "";
+        statusLine.textContent = `${payload.stage || "working"}: ${payload.message || ""}${leadText}`;
+      }
+
+      function setProgress(value, label) {
+        const pct = Math.max(0, Math.min(100, Number(value) || 0));
+        progressFill.style.width = `${pct}%`;
+        progressMeta.textContent = `${pct}% · ${label}`;
+      }
+
+      function buildParams() {
+        return new URLSearchParams({
           zip: document.getElementById("zipInput").value.trim(),
           radius_mi: document.getElementById("radiusInput").value,
           limit: document.getElementById("limitInput").value,
           include_abc: document.getElementById("abcInput").checked ? "true" : "false",
           include_llm: document.getElementById("llmInput").checked ? "true" : "false",
           llm_model: document.getElementById("llmModelInput").value.trim() || "kimi-k2.6:cloud",
+          llm_limit: "0",
         });
-        return `${path}?${params.toString()}`;
       }
 
       function render(payload) {
@@ -484,6 +579,7 @@
           ["Merged duplicates", data.merged_count],
           ["High score", data.high_score_count],
           ["Review first", data.review_first_count],
+          ["Existing customers", data.existing_customer_count || 0],
         ];
         summary.innerHTML = cards.map(([label, value]) => `
           <article class="metric">
@@ -507,7 +603,7 @@
 
       function renderRows(leads) {
         if (!leads.length) {
-          leadRows.innerHTML = `<tr><td colspan="8" class="empty">No leads matched the search.</td></tr>`;
+          leadRows.innerHTML = `<tr><td colspan="11" class="empty">No leads matched the search.</td></tr>`;
           return;
         }
 
@@ -517,15 +613,25 @@
           return `
             <tr>
               <td><span class="badge score ${scoreClass}">${lead.confidence_score}</span></td>
+              <td><span class="badge">${escapeHtml(lead.lead_status || "new_lead")}</span></td>
               <td class="name-cell">
                 <strong>${escapeHtml(lead.name || "Unnamed lead")}</strong>
                 <span class="subtle">${escapeHtml(lead.phone || "")}</span>
               </td>
               <td>${escapeHtml(lead.category || "")}</td>
               <td class="address">${escapeHtml(address || "No street address")}</td>
+              <td>
+                <strong>${escapeHtml(lead.customer_id || "")}</strong>
+                <div class="subtle">${escapeHtml([lead.customer_status, lead.customer_branch].filter(Boolean).join(" · "))}</div>
+                <div class="subtle">${escapeHtml(lead.customer_last_shopped || lead.customer_last_visit || "")}</div>
+              </td>
               <td><div class="tags">${badges(splitTags(lead.source))}</div></td>
               <td><div class="tags">${badges(splitTags(lead.signals))}</div></td>
               <td><div class="tags">${badges(splitTags(lead.warnings))}</div></td>
+              <td>
+                ${escapeHtml(lead.verification_summary || "")}
+                <div class="tags">${badges(splitTags(lead.verification_sources))}</div>
+              </td>
               <td>${escapeHtml(lead.llm_notes || "")}</td>
             </tr>
           `;
@@ -545,8 +651,20 @@
         searchButton.textContent = isBusy ? "Searching" : "Search";
       }
 
+      function disableExport() {
+        exportLink.classList.add("disabled");
+        exportLink.href = "#";
+        exportLink.setAttribute("aria-disabled", "true");
+      }
+
+      function enableExport(href) {
+        exportLink.classList.remove("disabled");
+        exportLink.href = href;
+        exportLink.setAttribute("aria-disabled", "false");
+      }
+
       function escapeHtml(value) {
-        return value.replace(/[&<>"']/g, (char) => ({
+        return String(value || "").replace(/[&<>"']/g, (char) => ({
           "&": "&amp;",
           "<": "&lt;",
           ">": "&gt;",

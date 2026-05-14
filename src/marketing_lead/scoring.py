@@ -75,6 +75,18 @@ def score_lead(lead: LeadCandidate) -> LeadCandidate:
 
     if lead.llm_notes and "unavailable" not in lead.llm_notes.lower():
         score += 3
+        lead.signals.append("llm_reviewed")
+
+    if lead.verification_summary:
+        score += 3
+
+    if lead.verification_sources:
+        lead.signals.append("has_verification_notes")
+
+    if lead.customer_id or lead.lead_status == "existing_customer":
+        lead.lead_status = "existing_customer"
+        lead.signals.append("matched_internal_customer")
+        lead.warnings.append("existing_customer_not_new_lead")
 
     # One-source discovery leads should not be treated as dispatch-ready.
     if source_count == 1 and "openstreetmap" in lead.source_names:
@@ -84,6 +96,9 @@ def score_lead(lead: LeadCandidate) -> LeadCandidate:
         score = min(score, 78)
     else:
         score = min(score, 92)
+
+    if lead.lead_status == "existing_customer":
+        score = min(score, 60)
 
     lead.signals = _dedupe(lead.signals)
     lead.warnings = _dedupe(lead.warnings)

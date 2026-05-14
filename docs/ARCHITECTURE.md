@@ -9,7 +9,7 @@ ZIP input
   -> normalize records
   -> merge likely duplicates
   -> score validation signals
-  -> web table / CSV export
+  -> terminal progress log / Excel workbook export
 ```
 
 ## Current Free Sources
@@ -70,3 +70,39 @@ The in-house advantage will come from combining free sources with Restaurant Dep
 4. Add batch geocoding for source records without coordinates.
 5. Add source-specific refresh timestamps and stale-data warnings.
 6. Add a simple analyst review workflow for accepting/rejecting leads.
+
+## Backend Terminal Workflow
+
+The primary operator path is:
+
+```text
+marketing-lead collect
+  -> progress callback
+  -> terminal and file logger
+  -> Excel workbook
+```
+
+The Excel workbook carries the run context alongside the lead rows:
+
+- `Parameters`: inputs, filters, output path, resolved ZIP centroid, and final counts.
+- `Source Reports`: source status, record counts, and source errors/warnings.
+- `Run Log`: ordered progress messages emitted by the pipeline.
+- `Leads`: scored lead records using the same field contract as CSV/JSON exports.
+
+## Cloud / Local Split
+
+The production workflow can be split when public web access is easier in a cloud runner but internal customer data must stay local:
+
+```text
+Cloud/network environment
+  -> marketing-lead discover
+  -> OSM / CA ABC / LLM or other public-source connectors
+  -> discovery JSON bundle
+
+Local environment
+  -> marketing-lead validate-customers
+  -> active customer snapshot where Status = A
+  -> final Excel workbook
+```
+
+The discovery bundle is a portable JSON artifact with no local customer data. The local validation step applies internal customer matching, appends the customer source report, rescoring, and exports the final workbook.
