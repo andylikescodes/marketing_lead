@@ -66,6 +66,7 @@ def _build_parser() -> argparse.ArgumentParser:
     collect.add_argument("--use-llm", action="store_true", help="Ask local Ollama to annotate top leads.")
     collect.add_argument("--llm-model", default="kimi-k2.6:cloud", help="Ollama model name.")
     collect.add_argument("--llm-limit", type=int, default=0, help="Maximum leads to review with Ollama; 0 means all.")
+    collect.add_argument("--enable-geocode-enrichment", action="store_true", help="Use Census geocoder to fill missing lead coordinates.")
     collect.add_argument(
         "--log-file",
         type=Path,
@@ -86,6 +87,7 @@ def _build_parser() -> argparse.ArgumentParser:
     discover.add_argument("--use-llm", action="store_true", help="Ask local Ollama to annotate top leads.")
     discover.add_argument("--llm-model", default="kimi-k2.6:cloud", help="Ollama model name.")
     discover.add_argument("--llm-limit", type=int, default=0, help="Maximum leads to review with Ollama; 0 means all.")
+    discover.add_argument("--enable-geocode-enrichment", action="store_true", help="Use Census geocoder to fill missing lead coordinates.")
     discover.add_argument(
         "--log-file",
         type=Path,
@@ -179,6 +181,7 @@ def _collect(args: argparse.Namespace) -> None:
         "llm_limit": args.llm_limit,
         "overpass_url": args.overpass_url,
         "overpass_timeout": args.timeout,
+        "enable_geocode_enrichment": args.enable_geocode_enrichment,
         "output_path": str(args.out),
         "output_format": output_format,
         "log_file": str(log_file),
@@ -215,6 +218,7 @@ def _collect(args: argparse.Namespace) -> None:
             overpass_url=args.overpass_url,
             overpass_timeout=args.timeout,
             include_customer_snapshot=True,
+            enable_geocode_enrichment=args.enable_geocode_enrichment,
             progress_callback=progress,
         )
     except Exception:
@@ -281,6 +285,7 @@ def _discover(args: argparse.Namespace) -> None:
         "include_customer_snapshot": False,
         "overpass_url": args.overpass_url,
         "overpass_timeout": args.timeout,
+        "enable_geocode_enrichment": args.enable_geocode_enrichment,
         "output_path": str(args.out),
         "log_file": str(log_file),
     }
@@ -308,6 +313,7 @@ def _discover(args: argparse.Namespace) -> None:
             overpass_url=args.overpass_url,
             overpass_timeout=args.timeout,
             include_customer_snapshot=False,
+            enable_geocode_enrichment=args.enable_geocode_enrichment,
             progress_callback=progress,
         )
     except Exception:

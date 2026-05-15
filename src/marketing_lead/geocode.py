@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import time
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -11,7 +13,23 @@ from marketing_lead.zcta import USER_AGENT, default_cache_dir
 CENSUS_GEOCODER_URL = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress"
 
 
+@dataclass(frozen=True)
+class GeocodeResult:
+    latitude: float
+    longitude: float
+    matched_address: str = ""
+    match_confidence: str = ""
+    source: str = "census_geocoder"
+
+
 def geocode_address(address: str, cache_dir: Path | None = None) -> tuple[float, float] | None:
+    result = geocode_address_details(address, cache_dir=cache_dir)
+    if not result:
+        return None
+    return result.latitude, result.longitude
+
+
+def geocode_address_details(address: str, cache_dir: Path | None = None) -> GeocodeResult | None:
     normalized = " ".join(address.split()).strip()
     if not normalized:
         return None
@@ -22,48 +40,74 @@ def geocode_address(address: str, cache_dir: Path | None = None) -> tuple[float,
     cache = _load_cache(cache_path)
     if normalized in cache:
         value = cache[normalized]
-        if value is None:
-            return None
-        return float(value[0]), float(value[1])
+        return _decode_cache_result(value)
 
-    params = urlencode(
-        {
-            "address": normalized,
-            "benchmark": "Public_AR_Current",
-            "format": "json",
-        }
-    )
+    params = urlencode({"address": normalized, "benchmark": "Public_AR_Current", "format": "json"})
     request = Request(
         f"{CENSUS_GEOCODER_URL}?{params}",
         headers={"Accept": "application/json", "User-Agent": USER_AGENT},
     )
-    try:
-        with urlopen(request, timeout=12) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except Exception:
-        cache[normalized] = None
-        _write_cache(cache_path, cache)
-        return None
 
-    matches = payload.get("result", {}).get("addressMatches", [])
+    payload = None
+    for attempt in range(3):
+        try:
+            with urlopen(request, timeout=12) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            break
+        except Exception:
+            if attempt == 2:
+                cache[normalized] = None
+                _write_cache(cache_path, cache)
+                return None
+            time.sleep(0.3 * (2**attempt))
+
+    matches = (payload or {}).get("result", {}).get("addressMatches", [])
     if not matches:
         cache[normalized] = None
         _write_cache(cache_path, cache)
         return None
 
-    coordinates = matches[0].get("coordinates", {})
+    match = matches[0]
+    coordinates = match.get("coordinates", {})
     if "x" not in coordinates or "y" not in coordinates:
         cache[normalized] = None
         _write_cache(cache_path, cache)
         return None
 
-    value = [float(coordinates["y"]), float(coordinates["x"])]
-    cache[normalized] = value
+    result = GeocodeResult(
+        latitude=float(coordinates["y"]),
+        longitude=float(coordinates["x"]),
+        matched_address=str(match.get("matchedAddress") or ""),
+        match_confidence=str(match.get("tigerLine", {}).get("side") or ""),
+    )
+    cache[normalized] = {
+        "latitude": result.latitude,
+        "longitude": result.longitude,
+        "matched_address": result.matched_address,
+        "match_confidence": result.match_confidence,
+        "source": result.source,
+    }
     _write_cache(cache_path, cache)
-    return value[0], value[1]
+    return result
 
 
-def _load_cache(path: Path) -> dict[str, list[float] | None]:
+def _decode_cache_result(value: object) -> GeocodeResult | None:
+    if value is None:
+        return None
+    if isinstance(value, list) and len(value) == 2:
+        return GeocodeResult(latitude=float(value[0]), longitude=float(value[1]))
+    if isinstance(value, dict):
+        return GeocodeResult(
+            latitude=float(value.get("latitude") or 0),
+            longitude=float(value.get("longitude") or 0),
+            matched_address=str(value.get("matched_address") or ""),
+            match_confidence=str(value.get("match_confidence") or ""),
+            source=str(value.get("source") or "census_geocoder"),
+        )
+    return None
+
+
+def _load_cache(path: Path) -> dict[str, object]:
     if not path.exists():
         return {}
     try:
@@ -76,7 +120,7 @@ def _load_cache(path: Path) -> dict[str, list[float] | None]:
     return payload
 
 
-def _write_cache(path: Path, cache: dict[str, list[float] | None]) -> None:
+def _write_cache(path: Path, cache: dict[str, object]) -> None:
     tmp_path = path.with_suffix(f"{path.suffix}.{os.getpid()}.tmp")
     with tmp_path.open("w", encoding="utf-8") as fh:
         json.dump(cache, fh, indent=2, sort_keys=True)

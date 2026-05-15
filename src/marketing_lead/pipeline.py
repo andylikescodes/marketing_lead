@@ -2,15 +2,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from time import perf_counter
 from typing import Callable
 
 from marketing_lead.ca_abc import collect_ca_abc_leads
 from marketing_lead.customer_snapshot import DEFAULT_SNAPSHOT_PATH, apply_customer_matches
+from marketing_lead.geocode import geocode_address_details
 from marketing_lead.llm import annotate_with_llm
 from marketing_lead.merge import merge_leads
 from marketing_lead.openbrewery import collect_openbrewery_leads
 from marketing_lead.models import LeadCandidate, ZipLocation
-from marketing_lead.openbrewery import collect_openbrewery_leads
 from marketing_lead.osm import OVERPASS_URL, collect_osm_leads
 from marketing_lead.scoring import score_leads
 from marketing_lead.zcta import lookup_zip_centroid
@@ -26,6 +27,7 @@ class SourceReport:
     count: int
     status: str
     detail: str = ""
+    duration_ms: int = 0
 
     @classmethod
     def from_dict(cls, payload: dict[str, object]) -> "SourceReport":
@@ -35,6 +37,7 @@ class SourceReport:
             count=int(payload.get("count") or 0),
             status=str(payload.get("status") or ""),
             detail=str(payload.get("detail") or ""),
+            duration_ms=int(payload.get("duration_ms") or 0),
         )
 
 
@@ -119,6 +122,7 @@ def search_leads(
     overpass_timeout: int = 45,
     include_customer_snapshot: bool = True,
     customer_snapshot_path: Path = DEFAULT_SNAPSHOT_PATH,
+    enable_geocode_enrichment: bool = False,
     progress_callback: ProgressCallback | None = None,
 ) -> LeadSearchResult:
     _progress(progress_callback, 3, "Resolving ZIP/ZCTA center.", stage="zip")
@@ -143,6 +147,10 @@ def search_leads(
 
     _progress(progress_callback, 48, "Merging duplicate source records.", stage="merge")
     merged = merge_leads(all_leads)
+
+    if enable_geocode_enrichment:
+        _progress(progress_callback, 54, "Enriching missing coordinates with Census geocoder.", stage="geocode")
+        _enrich_missing_coordinates(merged)
 
     if include_customer_snapshot:
         _progress(progress_callback, 58, "Matching against local customer snapshot.", stage="customer_snapshot")
@@ -245,12 +253,50 @@ def _run_source(
     all_leads: list[LeadCandidate],
     reports: list[SourceReport],
 ) -> None:
+    started = perf_counter()
     try:
         leads = source.collector(location, radius_meters)
         all_leads.extend(leads)
-        reports.append(SourceReport(name=source.name, label=source.label, count=len(leads), status="ok", detail=source.detail))
+        reports.append(
+            SourceReport(
+                name=source.name,
+                label=source.label,
+                count=len(leads),
+                status="ok",
+                detail=source.detail,
+                duration_ms=int((perf_counter() - started) * 1000),
+            )
+        )
     except Exception as exc:
-        reports.append(SourceReport(name=source.name, label=source.label, count=0, status="error", detail=str(exc)))
+        reports.append(
+            SourceReport(
+                name=source.name,
+                label=source.label,
+                count=0,
+                status="error",
+                detail=str(exc),
+                duration_ms=int((perf_counter() - started) * 1000),
+            )
+        )
+
+
+def _enrich_missing_coordinates(leads: list[LeadCandidate]) -> None:
+    for lead in leads:
+        if lead.latitude and lead.longitude:
+            continue
+        address = " ".join(
+            part for part in [lead.address_1, lead.city, lead.state, lead.postcode] if part
+        ).strip()
+        if not address:
+            continue
+        geocoded = geocode_address_details(address)
+        if geocoded:
+            lead.latitude = geocoded.latitude
+            lead.longitude = geocoded.longitude
+            lead.geocode_source = geocoded.source
+            lead.geocode_confidence = geocoded.match_confidence
+            lead.geocode_matched_address = geocoded.matched_address
+            lead.signals.append("census_geocoded")
 
 
 def _progress(

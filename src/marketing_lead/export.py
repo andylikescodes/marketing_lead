@@ -37,10 +37,13 @@ CSV_FIELDS = [
     "llm_notes",
     "verification_summary",
     "verification_sources",
+    "geocode_source",
+    "geocode_confidence",
+    "geocode_matched_address",
 ]
 
 PARAMETER_FIELDS = ["parameter", "value"]
-SOURCE_REPORT_FIELDS = ["name", "label", "status", "count", "detail"]
+SOURCE_REPORT_FIELDS = ["name", "label", "status", "count", "duration_ms", "detail"]
 RUN_LOG_FIELDS = ["timestamp", "progress", "stage", "message", "current_lead"]
 
 

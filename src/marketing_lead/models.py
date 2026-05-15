@@ -48,6 +48,9 @@ class LeadCandidate:
     customer_match_confidence: int = 0
     verification_summary: str = ""
     verification_sources: list[str] = field(default_factory=list)
+    geocode_source: str = ""
+    geocode_confidence: str = ""
+    geocode_matched_address: str = ""
 
     @classmethod
     def from_dict(cls, payload: dict[str, object]) -> "LeadCandidate":
@@ -78,6 +81,9 @@ class LeadCandidate:
             customer_match_confidence=int(payload.get("customer_match_confidence") or 0),
             verification_summary=str(payload.get("verification_summary") or ""),
             verification_sources=_split_list(payload.get("verification_sources")),
+            geocode_source=str(payload.get("geocode_source") or ""),
+            geocode_confidence=str(payload.get("geocode_confidence") or ""),
+            geocode_matched_address=str(payload.get("geocode_matched_address") or ""),
         )
 
     @property
@@ -113,6 +119,9 @@ class LeadCandidate:
             "customer_match_confidence": self.customer_match_confidence,
             "verification_summary": self.verification_summary,
             "verification_sources": "; ".join(self.verification_sources),
+            "geocode_source": self.geocode_source,
+            "geocode_confidence": self.geocode_confidence,
+            "geocode_matched_address": self.geocode_matched_address,
         }
 
 
